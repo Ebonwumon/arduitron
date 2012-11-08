@@ -17,6 +17,6 @@ Description: Implementation of the TRON lightcycle game for multiple players, us
 
 ##Deilvery and Demonstration##
 
-The entirety of the codebase will remain available on github for anyone to check out as desired. The README.md will contain wiring information and game instructions for those unfamiliar with it.
+The entirety of the codebase will remain available on [github](https://github.com/Ebonwumon/arduitron) for anyone to check out as desired. The README.md will contain wiring information and game instructions for those unfamiliar with it.
 
 Like the score system the game itself will be demonstrated frequently through the self-propogating, virus-like awesomeness that is TRON. Everyone able to play the lightcycle game will inevitibly do so.
