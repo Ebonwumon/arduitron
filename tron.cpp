@@ -27,7 +27,7 @@ int joystickYCentre;
 //bool wallPositions[160][128] = {false};
 uint8_t wallPositions[128][20] = { 0 };
 bool debug = false;
-position_t currentPosition = {158,1}; 
+position_t currentPosition = {158,5}; 
 movement_t direction = {-2, 0};
 
 /* Takes no input, returns position_t of the amount of *increase* required to add to x,y
@@ -72,21 +72,22 @@ void setup() {
 }
 
 void loop() {
-  tft.fillRect(currentPosition.x, currentPosition.y, 2, 2, ST7735_RED);
-  addWallPosition(currentPosition); 
-  movement_t temp = getJoystickInput();
-  if (validInput(temp, direction)) direction = temp;
-  else temp = direction; 
-  currentPosition.x += temp.x;
-  currentPosition.y += temp.y;
   if(!legalPosition(currentPosition)) {
     tft.setCursor(0, 80);
     tft.println("YOU SUPER LOSE");
     while(1);
   }
+  addWallPosition(currentPosition); 
+  tft.fillRect(currentPosition.x, currentPosition.y, 2, 2, ST7735_RED); // WILL NOT ADD POSITION FOR FIRST ITERATION
+  movement_t temp = getJoystickInput();
+  if (validInput(temp, direction)) direction = temp;
+  else temp = direction; 
+  currentPosition.x += temp.x;
+  currentPosition.y += temp.y;
+  
+ 
   delay(100);
 }
-
 movement_t getJoystickInput() {
   int8_t joystickXMap;
   int8_t joystickYMap;
@@ -109,14 +110,17 @@ movement_t getJoystickInput() {
 
 bool legalPosition(position_t pos) {
   if (getWallPosition(pos)){
+    printWalls();
     return false;
   }
-  else if (pos.x == LCD_WIDTH -1 || pos.x == 0 || pos.x +1 == LCD_WIDTH -1 || pos.x +1 == 0) {
+  else if (pos.x == LCD_WIDTH || pos.x == 0 || pos.x +1 == LCD_WIDTH || pos.x +1 == 0) { // TODO UINT comparisons for -1 ?
     Serial.println("2: ");
+    printWalls();
     return false;
   }
-  else if (pos.y == LCD_HEIGHT -1 || pos.y == 0 || pos.y +1 == LCD_HEIGHT -1 || pos.y +1 == 0) { 
+  else if (pos.y == LCD_HEIGHT || pos.y == 0 || pos.y +1 == LCD_HEIGHT || pos.y +1 == 0) { 
     Serial.println("3: ");
+    printWalls();
     return false;
   }
   else return true;
@@ -133,36 +137,101 @@ bool validInput(movement_t in, movement_t old) {
 }
 
 void addWallPosition(position_t pos) {
-  wallPositions[pos.y][pos.x/8] |= ((pos.x % 8 > 0) ? 1 << (pos.x % 8) - 1 : 1);
-  wallPositions[pos.y][(pos.x+1)/8] |= (((pos.x+1) % 8 > 0) ? 1 << ((pos.x+1) % 8) - 1 : 1);
-  wallPositions[pos.y +1][pos.x/8] |=  ((pos.x % 8 > 0) ? 1 << (pos.x % 8) - 1 : 1);
-  wallPositions[pos.y +1][(pos.x +1)/8] |= (((pos.x+1) % 8 > 0) ? 1 << ((pos.x+1) % 8) - 1 : 1);
-  if (debug) {
-    Serial.print("adding Wall position: ");
-    Serial.print(pos.y);
-    Serial.print(", ");
-    Serial.println(wallPositions[pos.y][pos.x/8], BIN);
-  }
+  uint8_t divisionOfXPosition = pos.x/8;
+  uint8_t modOfXPosition = pos.x % 8;
+  uint8_t divisionOfX2Position = (pos.x +1) / 8;
+  uint8_t modOfX2Position = (pos.x +1) % 8;
+  
+  wallPositions[pos.y][divisionOfXPosition] |= ((modOfXPosition > 0) ? 1 << ((modOfXPosition) - 1) : 1);
+  wallPositions[pos.y][divisionOfX2Position] |= ((modOfX2Position > 0) ? 1 << (modOfX2Position - 1) : 1);
+  wallPositions[pos.y +1][(divisionOfXPosition)] |=  ((modOfXPosition > 0) ? 1 << (modOfXPosition - 1) : 1);
+  wallPositions[pos.y +1][divisionOfX2Position] |= ((modOfX2Position > 0) ? 1 << (modOfX2Position - 1) : 1);
 }
 
 bool getWallPosition(position_t pos) {
   uint8_t val = wallPositions[pos.y][pos.x / 8];
-  if (debug) {
-    Serial.print("Val of WalPos at ");
-    Serial.print(pos.y);
-    Serial.print(": ");
-    Serial.println(val, BIN);
-  }
   switch (pos.x % 8) {
-    case 0: return (val & 1); break;
-    case 1: return (val & 2); break;
-    case 2: return (val & 4); break;
-    case 3: return (val & 8); break;
-    case 4: return (val & 16); break;
-    case 5: return (val & 32); break;
-    case 6: return (val & 64); break;
-    case 7: return (val & 128); break;
+    case 0: if (val & 1) return 1; 
+              else break;
+    case 1: if (val & 2) return 1;
+              else break;
+    case 2: if (val & 4) return 1; 
+              else break;
+    case 3: if (val & 8) return 1; 
+               else break;
+    case 4: if (val & 16) return 1; 
+               else break;   
+    case 5: if (val & 32) return 1;
+                else break;   
+    case 6: if (val & 64) return 1;
+                 else break;   
+    case 7: if (val & 128) return 1; 
+              else break;
   } 
+  /*val = wallPositions[pos.y +1][pos.x /8]; //TODO check all four positions - something is broken here
+
+  switch (pos.x % 8) {
+    case 0: if (val & 1) return 1; 
+              else break;
+    case 1: if (val & 2) return 1;
+              else break;
+    case 2: if (val & 4) return 1; 
+              else break;
+    case 3: if (val & 8) return 1; 
+               else break;
+    case 4: if (val & 16) return 1; 
+               else break;   
+    case 5: if (val & 32) return 1; 
+                else break;   
+    case 6: if (val & 64) return 1; 
+                 else break;   
+    case 7: if (val & 128) return 1; 
+              else break;
+  } 
+
+  val = wallPositions[pos.y][(pos.x +1) / 8];
+
+  switch ((pos.x +1) % 8) {
+    case 0: if (val & 1) return 1; 
+              else break;
+    case 1: if (val & 2) return 1;
+              else break;
+    case 2: if (val & 4) return 1; 
+              else break;
+    case 3: if (val & 8) return 1; 
+               else break;
+    case 4: if (val & 16) return 1; 
+               else break;   
+    case 5: if (val & 32) return 1; 
+                else break;   
+    case 6: if (val & 64) return 1; 
+                 else break;   
+    case 7: if (val & 128) return 1; 
+                 else break;
+  }
+  val = wallPositions[pos.y +1][(pos.x +1) /8];
+
+  switch ((pos.x +1) % 8) {
+    case 0: if (val & 1) return 1; 
+              else break;
+    case 1: if (val & 2) return 1; 
+              else break;
+    case 2: if (val & 4) return 1; 
+              else break;
+    case 3: if (val & 8) return 1; 
+               else break;
+    case 4: if (val & 16) return 1; 
+               else break;   
+    case 5: if (val & 32) return 1; 
+                else break;   
+    case 6: if (val & 64) return 1; 
+                 else break;   
+    case 7: if (val & 128) return 1; 
+              else break;
+  }*/
+
+  return 0;
+
 }
 
 void printWalls() {
