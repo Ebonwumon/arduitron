@@ -10,6 +10,12 @@
 #define JOYSTICK_BUTTON_PIN 9
 #define JOYSTICK_MOVE_X_PIN 0 //pins x,y are reversed because of screen orientation
 #define JOYSTICK_MOVE_Y_PIN 1
+#define COUNTDOWN_START_RED_1 22
+#define COUNTDOWN_START_RED_2 30
+#define COUNTDOWN_MID_RED_1 24
+#define COUNTDOWN_MID_RED_2 28
+#define COUNTDOWN_GREEN 26
+
 typedef struct {
   uint8_t x;
   uint8_t y;
@@ -32,6 +38,7 @@ int joystickYCentre;
 uint8_t wallPositions[128][20] = { 0 };
 bool debug = false;
 bool gameStarted = false;
+int winner;
 player_t player1;
 player_t player2;
 
@@ -40,26 +47,24 @@ player_t player2;
  *  the other always -2 or 2 unless the joystick is at identical x,y
  * */
 movement_t getJoystickInput();
-
 /* Takes the current movement_t taken from the joystick and the old movement_t that maintains speed.
  * valid inputs have: a direction and cannot reverse directions on the spot. they must turn
  */
 bool validInput(movement_t in, movement_t old);
 /*
- * TODO DOCS
+ * Checks position for legality. Returns false if illegal. Legal positions have:
+ *  -no walls present
+ *  -not in contact with the borders of the screen
  */
 bool legalPosition(position_t pos);
 /*
- * TODO DOCS
- */
-bool intersects(position_t dotPlace);
-/*
- * TODO DOCS
+ * takes a position_t and adds walls to the four pixel block starting at the top left
  */
 void addWallPosition(position_t pos);
-
+/*
+ * checks single pixel for a wall. Returns true if wall, false otherwise. Must be called four times to check all of cursor size
+ */
 bool getWallPosition(uint8_t x, uint8_t y);
-
 void printWalls();
 /*
  * Takes a string and outputs it to both the serial monitor and LCD display
@@ -68,17 +73,29 @@ void dualPrint(char *s);
 
 void drawGUI();
 
-void drawPointer();
-
+/*
+ * Waits for hardware. Takes a digital hardware pin and the desired state (HIGH/LOW) and will wait until the hardware is in that state
+ */
 bool waitUntil(int pin, bool pos);
 
 bool startNetwork();
-
+/*
+ * Handles the transmitting of spawn locations accross serial port
+ */
 void setSpawns(player_t *p1, player_t *p2);
-
+/*
+ * called only by the leading party (winner of random flip). sets the current position of both players to an acceptable opposite
+ * spawn position, randomly decided
+ */
 void getSpawns(player_t *p1, player_t *p2); 
 
 uint8_t getUint();
+
+void sendDeltas(movement_t *m);
+
+void receiveDeltas(movement_t *m);
+void startCountdown();
+int gameOver(position_t *p1, position_t *p2);
 
 int8_t getInt();
 void setup() {
@@ -89,6 +106,11 @@ void setup() {
   joystickXCentre = analogRead(JOYSTICK_MOVE_X_PIN) - 512;
   joystickYCentre = analogRead(JOYSTICK_MOVE_Y_PIN) - 512;
   pinMode(JOYSTICK_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(COUNTDOWN_START_RED_1, OUTPUT);
+  pinMode(COUNTDOWN_START_RED_2, OUTPUT);
+  pinMode(COUNTDOWN_MID_RED_1, OUTPUT);
+  pinMode(COUNTDOWN_MID_RED_2, OUTPUT);
+  pinMode(COUNTDOWN_GREEN, OUTPUT);
   tft.setRotation(1); //because our screen is nonstandard rotation
   tft.fillScreen(ST7735_BLACK);
 }
@@ -98,29 +120,42 @@ void loop() {
     drawGUI();
     while(!waitUntil(JOYSTICK_BUTTON_PIN, false));
     if (!startNetwork()) {
+      //FAIL CASE
     }
     setSpawns(&player1, &player2);
     Serial.println(player1.currentPosition.x);
+    tft.fillScreen(ST7735_BLACK);
+    startCountdown();
     gameStarted = true;
   }
-
-  // Check if the position is acceptable
-  if(!legalPosition(player1.currentPosition)) {
+  winner = gameOver(&player1.currentPosition, &player2.currentPosition);
+  if (winner) {
     tft.setCursor(0, 80);
-    tft.println("YOU SUPER LOSE");
-    printWalls();
+    String message;
+    switch (winner) {
+      case -1: message = "YOU SUPER TIE"; break;
+      case 1: message = "YOU SUPER WIN"; break;
+      case 2: message = "YOU SUPER LOSE"; break;
+    }
+    tft.println(message);
     while(1);
   }
   // add a wall ad draw car at current position
-  addWallPosition(player1.currentPosition); 
+  addWallPosition(player1.currentPosition);
+  addWallPosition(player2.currentPosition);
   tft.fillRect(player1.currentPosition.x, player1.currentPosition.y, 2, 2, ST7735_RED);
+  tft.fillRect(player2.currentPosition.x, player2.currentPosition.y, 2, 2, ST7735_BLUE);
   movement_t temp = getJoystickInput();
   if (validInput(temp, player1.direction)) player1.direction = temp;
-  else temp = player1.direction; 
+  else temp = player1.direction;
+  sendDeltas(&temp);
+  receiveDeltas(&player2.direction);
   player1.currentPosition.x += temp.x;
   player1.currentPosition.y += temp.y;
+  player2.currentPosition.x += player2.direction.x;
+  player2.currentPosition.y += player2.direction.y; 
+  
   delay(75);
- 
 }
 movement_t getJoystickInput() {
   int8_t joystickXMap;
@@ -163,7 +198,7 @@ bool legalPosition(position_t pos) {
 
 bool validInput(movement_t in, movement_t old) {
   if (in.x == 0 && in.y == 0) return false;
-  if ((in.x * -1 == in.x && in.x != 0)  || (in.y * -1 == in.y && in.y != 0)) return false;
+  if ((in.x * -1 == old.x && in.x != 0)  || (in.y * -1 == old.y && in.y != 0)) return false;
   return true;
 }
 
@@ -214,7 +249,7 @@ void printWalls() {
 }
 
 bool waitUntil(int pin, bool pos) {
-  while (digitalRead(JOYSTICK_BUTTON_PIN) != pos);
+  while (digitalRead(pin) != pos);
   return true;
 }
 
@@ -290,6 +325,22 @@ void getSpawns(player_t *p1, player_t *p2) {
   }
 }
 
+void sendDeltas(movement_t *m) {
+  Serial1.write((int8_t)m->x);
+  Serial1.write((int8_t)m->y);
+}
+
+void receiveDeltas(movement_t *m) {
+  int8_t deltx = getInt();
+  int8_t delty = getInt();
+  Serial.print("deltx: ");
+  Serial.println(deltx);
+  Serial.print("delty: ");
+  Serial.println(delty);
+  m->x = deltx;
+  m->y = delty;
+}
+
 void dualPrint(char *s) {
   Serial.println(s);
 }
@@ -298,9 +349,7 @@ uint8_t getUint() {
   int val = 0;
   Serial.println("getUint");
   while (val == 0) {
-    Serial.println("getU If");
     if (Serial1.available()) {
-      Serial.println("iter");
       val = Serial1.read();
       return (uint8_t) val;
     }
@@ -311,11 +360,35 @@ int8_t getInt() {
   int val = 0;
   while (val == 0) {
     if (Serial1.available()) {
-      Serial.println("iter");
       val = Serial1.read();
       return (int8_t) val;
     }
   }
+}
+
+int gameOver(position_t *p1, position_t *p2) {
+  bool p1legal = legalPosition(*p1);
+  bool p2legal = legalPosition(*p2);
+  if (p1legal && !p2legal) return 1;
+  if (!p1legal && p2legal) return 2;
+  if (!p1legal && !p2legal) return -1;
+  return 0;
+}
+
+
+
+void startCountdown() {
+  digitalWrite(COUNTDOWN_START_RED_1, HIGH);
+  digitalWrite(COUNTDOWN_START_RED_2, HIGH);
+  delay(700);
+  digitalWrite(COUNTDOWN_MID_RED_1, HIGH);
+  digitalWrite(COUNTDOWN_MID_RED_2, HIGH);
+  delay(700);
+  digitalWrite(COUNTDOWN_START_RED_1, LOW);
+  digitalWrite(COUNTDOWN_START_RED_2, LOW);
+  digitalWrite(COUNTDOWN_MID_RED_1, LOW);
+  digitalWrite(COUNTDOWN_MID_RED_2, LOW);
+  digitalWrite(COUNTDOWN_GREEN, HIGH);
 }
 
 /*void printPlayer(player_t *p) {
