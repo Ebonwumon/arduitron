@@ -49,7 +49,7 @@ bool gameCreated = false;
 int winner;
 Sd2Card card;
 lcd_image_t logoImage = { "tron.lcd", 100, 50 };
-player_t player1;
+player_t player1; // careful with these, their data is initialized all over the place
 player_t player2;
 
 /* Takes no input, returns position_t of the amount of *increase* required to add to x,y
@@ -75,40 +75,64 @@ void addWallPosition(position_t pos);
  * checks single pixel for a wall. Returns true if wall, false otherwise. Must be called four times to check all of cursor size
  */
 bool getWallPosition(uint8_t x, uint8_t y);
-void printWalls();
 /*
  * Takes a string and outputs it to both the serial monitor and LCD display
  */
 void dualPrint(char *s);
-
 void drawGUI();
-
 /*
  * Waits for hardware. Takes a digital hardware pin and the desired state (HIGH/LOW) and will wait until the hardware is in that state
  */
 bool waitUntil(int pin, bool pos);
-
+/*
+ * Returns false if unable to establish a connection between the arduinos.
+ */
 bool startNetwork();
 /*
  * Handles the transmitting of spawn locations accross serial port
  */
 void setSpawns(player_t *p1, player_t *p2);
-void setColour(player_t *p1, player_t *p2);
 /*
- * called only by the leading party (winner of random flip). sets the current position of both players to an acceptable opposite
- * spawn position, randomly decided
+ * Generates the spawn locations. Spanws must be opposite accross the screen.
  */
 void getSpawns(player_t *p1, player_t *p2); 
-
+/*
+ * For later implementations, only sets player 1 to red and player 2 to blue
+ */
+void setColour(player_t *p1, player_t *p2);
+/*
+ * Called when a uint/int is expected from the serial port. Will wait until it is recieved.
+ * if serial comm is nonfunctional, this will cause program progression to halt
+ */
 uint8_t getUint();
-
+int8_t getInt();
+/*
+ * Sends the current movement path of player 1 as movement_t over the serial port.
+ */
 void sendDeltas(movement_t *m);
-
+/*
+ * Recives the integer values of the deltas sent by the other player and sets it to the relevant x,y
+ * of the struct passed into this function.
+ *
+ * eg. pass player2.direction directly into this function and it will handle both the getting and
+ * setting
+ */
 void receiveDeltas(movement_t *m);
+/*
+ * handles physical light countdown
+ */
 void startCountdown();
+/*
+ * takes a pointer to both player structs and evaluates whether the game is over by checking 
+ * legal positions.
+ * returns:
+ * -1 if tie
+ * 1 if player 1 wins
+ * 2 if player 2 wins
+ * 0 (false) if the game state is permissible
+ */
 int gameOver(position_t *p1, position_t *p2);
 
-int8_t getInt();
 void setup() {
   Serial.begin(9600);
   Serial1.begin(9600);
@@ -142,15 +166,25 @@ void loop() {
     drawGUI();
     while(!waitUntil(JOYSTICK_BUTTON_PIN, false));
     if (!startNetwork()) {
-      //TODO FAIL CASE
+      tft.fillScreen(ST7735_BLACK); // we must clear all conflicting messages from screen
+      tft.setCursor(0,0);
+      dualPrint("Network connection failed!");
+      dualPrint("Please ensure:");
+      dualPrint("1) both arduinos are connected");
+      dualPrint("2) both parties pressed the joystick");
+      dualPrint("If both are true, consult someone who");
+      dualPrint("looks like he knows what he's talking about");
+      dualPrint("Reset both Arduinos to try again");
+      while(1);
     }
-    // TODO COLOUR SELECTION
+    /* Extensibility Goal: 
+     * Enable colour selection here, time permissible
+     */
     gameCreated = true;
   }
   if (!gameStarted) {
     setSpawns(&player1, &player2);
     setColour(&player1, &player2);
-    Serial.println(player1.currentPosition.x);
     tft.fillScreen(ST7735_BLACK);
     startCountdown();
     gameStarted = true;
@@ -181,19 +215,22 @@ void loop() {
     addWallPosition(player2.currentPosition);
     tft.fillRect(player1.currentPosition.x, player1.currentPosition.y, 2, 2, player1.colour);
     tft.fillRect(player2.currentPosition.x, player2.currentPosition.y, 2, 2, player2.colour);
-    movement_t temp = getJoystickInput();
-    if (validInput(temp, player1.direction)) player1.direction = temp;
-    else temp = player1.direction;
-    sendDeltas(&temp);
+    movement_t newDirection = getJoystickInput();
+    if (validInput(newDirection, player1.direction)) player1.direction = newDirection;
+    sendDeltas(&player1.direction);
     receiveDeltas(&player2.direction);
-    player1.currentPosition.x += temp.x;
-    player1.currentPosition.y += temp.y;
+    player1.currentPosition.x += player1.direction.x;
+    player1.currentPosition.y += player1.direction.y;
     player2.currentPosition.x += player2.direction.x;
     player2.currentPosition.y += player2.direction.y; 
-    
-    delay(75);
+    delay(75); // this is how we control the game speed
+    /* Extensibility Goal:
+     * Find a more efficient and reliable way of controlling game speed.
+     * Implement it, and allow it to be customized
+     */
   }
 }
+
 movement_t getJoystickInput() {
   int8_t joystickXMap;
   int8_t joystickYMap;
@@ -224,7 +261,11 @@ bool legalPosition(position_t pos) {
   if (hasWall) {
     return false;
   }
-  else if (pos.x == LCD_WIDTH || pos.x == 0 || pos.x +1 == LCD_WIDTH || pos.x +1 == 0) { // TODO UINT comparisons for -1 ?
+  /* Extensibility goal:
+   * Because these are unsigned integers we are disallowing position 0.
+   * Position 0 really ought to be allowed - find a way to do these comparisons properly
+   */
+  else if (pos.x == LCD_WIDTH || pos.x == 0 || pos.x +1 == LCD_WIDTH || pos.x +1 == 0) { 
     return false;
   }
   else if (pos.y == LCD_HEIGHT || pos.y == 0 || pos.y +1 == LCD_HEIGHT || pos.y +1 == 0) { 
@@ -274,39 +315,24 @@ void drawGUI() {
   lcd_image_draw(&logoImage, &tft, 0, 0, 30, 10, 100, 50);
 }
 
-void printWalls() {
-  for (int i=0; i < 10; i++) {
-    Serial.print(i);
-    Serial.print(": ");
-    for (int j=0; j < 20; j++) {
-      Serial.print(wallPositions[i][j], BIN);
-      Serial.print(", ");
-    }
-    Serial.println();
-    Serial.println();
-  }
-}
-
 bool waitUntil(int pin, bool pos) {
   while (digitalRead(pin) != pos);
   return true;
 }
 
 bool startNetwork() {
-  Serial1.write('r');
-  for (int i=0; i < 10; i++) {
-
-  if (Serial1.peek() == 'r') {
-    Serial1.read();
-    dualPrint("Connection established!");
-    return true;
-  }
-  else {
-    // TODO fail case
-    dualPrint("Establishing connection...");
-    delay(500);
-  }
-  }
+  Serial1.write('r'); // We send an arbitrary ready character
+  for (int i=0; i < 10; i++) { // we'll try ten times for a total of five second wait times
+    if (Serial1.peek() == 'r') {
+      Serial1.read(); // remove it from the buffer so we're ready to get actual data
+      dualPrint("Link established!");
+      return true;
+    } else {
+      dualPrint("Attempting link...");
+      delay(500);
+    }
+  } 
+  return false; // we've failed, go home
 }
 
 void setSpawns(player_t *p1, player_t *p2) {
@@ -336,11 +362,8 @@ void setSpawns(player_t *p1, player_t *p2) {
         p1->direction.x = getInt();
         p1->direction.y = getInt();
       }
-    } else {
-      Serial.println("Serial is not available");
-    }
+    } 
   }
-  Serial.println("finished creation");
 }
 
 void setColour(player_t *p1, player_t *p2) {
@@ -420,8 +443,6 @@ int gameOver(position_t *p1, position_t *p2) {
   return 0;
 }
 
-
-
 void startCountdown() {
   digitalWrite(COUNTDOWN_GREEN, LOW);
   digitalWrite(COUNTDOWN_START_RED_1, HIGH);
@@ -437,6 +458,3 @@ void startCountdown() {
   digitalWrite(COUNTDOWN_GREEN, HIGH);
 }
 
-/*void printPlayer(player_t *p) {
-  Serial.print("player has x: ")
-}*/
