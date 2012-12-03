@@ -1,7 +1,11 @@
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
+#include <SPI.h>
+#include <SD.h>
+#include "lcd_image.h"
 
+#define SD_CS 5
 #define TFT_CS 6
 #define TFT_DC 7
 #define TFT_RST 8
@@ -15,6 +19,7 @@
 #define COUNTDOWN_MID_RED_1 24
 #define COUNTDOWN_MID_RED_2 28
 #define COUNTDOWN_GREEN 26
+#define WALL_ARRAY_SIZE = 2560 
 
 typedef struct {
   uint8_t x;
@@ -29,6 +34,8 @@ typedef struct {
 typedef struct {
   position_t currentPosition;
   movement_t direction;
+  uint8_t score;
+  uint16_t colour;
 } player_t;
 
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
@@ -38,7 +45,10 @@ int joystickYCentre;
 uint8_t wallPositions[128][20] = { 0 };
 bool debug = false;
 bool gameStarted = false;
+bool gameCreated = false;
 int winner;
+Sd2Card card;
+lcd_image_t logoImage = { "tron.lcd", 100, 50 };
 player_t player1;
 player_t player2;
 
@@ -83,6 +93,7 @@ bool startNetwork();
  * Handles the transmitting of spawn locations accross serial port
  */
 void setSpawns(player_t *p1, player_t *p2);
+void setColour(player_t *p1, player_t *p2);
 /*
  * called only by the leading party (winner of random flip). sets the current position of both players to an acceptable opposite
  * spawn position, randomly decided
@@ -112,17 +123,33 @@ void setup() {
   pinMode(COUNTDOWN_MID_RED_2, OUTPUT);
   pinMode(COUNTDOWN_GREEN, OUTPUT);
   tft.setRotation(1); //because our screen is nonstandard rotation
+  player1.score = 0;
+  player2.score = 0;
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD Init Failed");
+    return;
+  }
+  if (!card.init(SPI_HALF_SPEED, SD_CS)) {
+    Serial.println("Raw SD Init failed");
+    while (1);
+  }
   tft.fillScreen(ST7735_BLACK);
 }
 
 void loop() {
-  if (!gameStarted) {
+  // Though counter-intuitive, game creation cannot be in setup because of varying arduino boot times and boot gibberish
+  if (!gameCreated) {  
     drawGUI();
     while(!waitUntil(JOYSTICK_BUTTON_PIN, false));
     if (!startNetwork()) {
-      //FAIL CASE
+      //TODO FAIL CASE
     }
+    // TODO COLOUR SELECTION
+    gameCreated = true;
+  }
+  if (!gameStarted) {
     setSpawns(&player1, &player2);
+    setColour(&player1, &player2);
     Serial.println(player1.currentPosition.x);
     tft.fillScreen(ST7735_BLACK);
     startCountdown();
@@ -134,28 +161,38 @@ void loop() {
     String message;
     switch (winner) {
       case -1: message = "YOU SUPER TIE"; break;
-      case 1: message = "YOU SUPER WIN"; break;
-      case 2: message = "YOU SUPER LOSE"; break;
+      case 1: message = "YOU SUPER WIN"; player1.score++; break;
+      case 2: message = "YOU SUPER LOSE"; player2.score++; break;
     }
     tft.println(message);
-    while(1);
+    tft.println("SCORES:");
+    tft.print("You: ");
+    tft.print(player1.score);
+    tft.print(" | Him: ");
+    tft.println(player2.score);
+    tft.println("Again? <Press Joystick>");
+    waitUntil(JOYSTICK_BUTTON_PIN, LOW);
+    memset(&wallPositions, 0, 2560); // 2560 is a magic number because size_ts were acting unexpectedly 
+    gameStarted = false;
+    tft.fillScreen(ST7735_BLACK);
+  } else {
+    // add a wall ad draw car at current position
+    addWallPosition(player1.currentPosition);
+    addWallPosition(player2.currentPosition);
+    tft.fillRect(player1.currentPosition.x, player1.currentPosition.y, 2, 2, player1.colour);
+    tft.fillRect(player2.currentPosition.x, player2.currentPosition.y, 2, 2, player2.colour);
+    movement_t temp = getJoystickInput();
+    if (validInput(temp, player1.direction)) player1.direction = temp;
+    else temp = player1.direction;
+    sendDeltas(&temp);
+    receiveDeltas(&player2.direction);
+    player1.currentPosition.x += temp.x;
+    player1.currentPosition.y += temp.y;
+    player2.currentPosition.x += player2.direction.x;
+    player2.currentPosition.y += player2.direction.y; 
+    
+    delay(75);
   }
-  // add a wall ad draw car at current position
-  addWallPosition(player1.currentPosition);
-  addWallPosition(player2.currentPosition);
-  tft.fillRect(player1.currentPosition.x, player1.currentPosition.y, 2, 2, ST7735_RED);
-  tft.fillRect(player2.currentPosition.x, player2.currentPosition.y, 2, 2, ST7735_BLUE);
-  movement_t temp = getJoystickInput();
-  if (validInput(temp, player1.direction)) player1.direction = temp;
-  else temp = player1.direction;
-  sendDeltas(&temp);
-  receiveDeltas(&player2.direction);
-  player1.currentPosition.x += temp.x;
-  player1.currentPosition.y += temp.y;
-  player2.currentPosition.x += player2.direction.x;
-  player2.currentPosition.y += player2.direction.y; 
-  
-  delay(75);
 }
 movement_t getJoystickInput() {
   int8_t joystickXMap;
@@ -231,8 +268,10 @@ bool getWallPosition(uint8_t x, uint8_t y) {
 
 void drawGUI() {
   tft.fillScreen(ST7735_BLACK);
-  tft.setCursor(0,0);
-  tft.println("Press down joystick to search for partner");
+  tft.setCursor(0,70);
+  dualPrint("Play a game?");
+  dualPrint("<Press Joystick>");
+  lcd_image_draw(&logoImage, &tft, 0, 0, 30, 10, 100, 50);
 }
 
 void printWalls() {
@@ -259,7 +298,6 @@ bool startNetwork() {
 
   if (Serial1.peek() == 'r') {
     Serial1.read();
-    Serial.println("It has been here");
     dualPrint("Connection established!");
     return true;
   }
@@ -278,13 +316,8 @@ void setSpawns(player_t *p1, player_t *p2) {
   while (hisFlip == 0) {
     if (Serial1.available()) {
       hisFlip = Serial1.read();
-      Serial.print("myFlip: ");
-      Serial.println(myFlip);
-      Serial.print("hisFlip: ");
-      Serial.println(hisFlip);
       if (myFlip > hisFlip) {
         getSpawns(p1, p2);
-        Serial.println("I'm creating this");
         Serial1.write((uint8_t)p1->currentPosition.x);
         Serial1.write((uint8_t)p1->currentPosition.y);
         Serial1.write((int8_t)p1->direction.x);
@@ -310,18 +343,29 @@ void setSpawns(player_t *p1, player_t *p2) {
   Serial.println("finished creation");
 }
 
+void setColour(player_t *p1, player_t *p2) {
+  p1->colour = ST7735_RED;
+  p2->colour = ST7735_BLUE;
+}
+
 void getSpawns(player_t *p1, player_t *p2) {
   uint8_t randNum = random(0,2);
   Serial.println("randNum: ");
   Serial.println(randNum);
   if (randNum == 0) {
-    player_t temp1 = {8, 64, 2, 0}; player_t temp2 = {152, 64, -2, 0};  
-    (*p1) = temp1;
-    (*p2) = temp2;
+    position_t pos1 = {8, 64}; movement_t dir1 = {2, 0}; 
+    position_t pos2 = {152, 64}; movement_t dir2 = {-2, 0};  
+    p1->currentPosition = pos1;
+    p1->direction = dir1;
+    p2->currentPosition = pos2;
+    p2->direction = dir2;
   } else {
-    player_t temp1 = {80, 120, 0, -2}; player_t temp2 = {80, 8, 0, 2};
-    (*p1) = temp1;
-    (*p2) = temp2;
+    position_t pos1 = {80, 120}; movement_t dir1 = {0, -2}; 
+    position_t pos2 = {80, 8}; movement_t dir2 = {0, 2};
+    p1->currentPosition = pos1;
+    p1->direction = dir1;
+    p2->currentPosition = pos2;
+    p2->direction = dir2;
   }
 }
 
@@ -343,6 +387,7 @@ void receiveDeltas(movement_t *m) {
 
 void dualPrint(char *s) {
   Serial.println(s);
+  tft.println(s);
 }
 
 uint8_t getUint() {
@@ -378,6 +423,7 @@ int gameOver(position_t *p1, position_t *p2) {
 
 
 void startCountdown() {
+  digitalWrite(COUNTDOWN_GREEN, LOW);
   digitalWrite(COUNTDOWN_START_RED_1, HIGH);
   digitalWrite(COUNTDOWN_START_RED_2, HIGH);
   delay(700);

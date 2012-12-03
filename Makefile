@@ -1,7 +1,7 @@
 TARGET = tron
 
 # Place your Arduino libs here! It's okay to not define this.
-ARDUINO_LIBS = SoftwareSerial SPI Adafruit_GFX Adafruit_ST7735 #Adafruit_SD Adafruit_SD/utility SD/utility
+ARDUINO_LIBS = SoftwareSerial SPI Adafruit_GFX Adafruit_ST7735 Adafruit_SD Adafruit_SD/utility SD/utility
 
 # Either set this here or type `make upload BOARD_TAG=uno`
 BOARD_TAG = mega2560 
