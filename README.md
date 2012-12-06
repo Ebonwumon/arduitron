@@ -23,6 +23,18 @@ Fifth (Red) --> 30
 
 *NOTE* Ensure there are resistors on each LED or else the entire world will explode. 
 
+##Build Notes##
+Your build target is tron.cpp, with the lcd image libraries. You will need two arduinos to sufficiently run this project; there is no single player mode.
+
+For startup graphics tron.lcd will need to be put on the root of the SD card - if it's not there the code *should* work fine imageless, but there is no guarantee of that.
+
+##Running##
+There are a couple expectations of the user in this application. First, the user must not interact with the joystick before bootup has finished (don't touch the joystick until you see arduitron image and instructions to continue). Wait until both arduinos have booted before pressing the joystick. If both haven't started you may get timeout errors on connecting.
+
+Sometimes after extended play the arduinos serial connection will fall out of sync. This is self-corrected by the arduino, if they are out of sync and you attempt to start a new game you will get a black screen and no countdown timer. To fix this you must reset both arduinos. This most certainly a feature and not a bug (it emulates the insertion of a coin into an arcade machine).
+
+EULA: By using this software you are implicitly agreeing that should you become sucked into the virtual game world you will collect and surrender unto the author of this software Jeff Bridges's autograph.
+
 ##MileStones##
 1. Implement single-player, single-car tron. The car should move around the screen, keeping tracks of where it has been both visually through the trail left behind, and programmatically through an array of bits stored in memory. Crashing into the car's own walls or the screens boundaries will trigger failure.
 
