@@ -3,22 +3,29 @@
 Description: Implementation of the TRON lightcycle game for multiple players, using the Serial port for communication. Both players should be able to see, and effectively crash into, each other's walls and driving of the cars will be realtime.
 
 ##Wiring##
+A picture of the wiring can be found in wiring.jpg in this folder
 
 ###LCD###
 The wiring for the LCD screen is as per the assignment 2 spec, however the LCD screen must be oriented such that the SD card slot on the screen faces *away* from the Arduino chip. 
 
 ###Joystick###
 Vertical --> A0
+
 Horizontal --> A1
+
 Button/Sel --> Pin 9
 
 Ground/Power as per normal.
 
 ###Lights###
 First (Red) --> 22
+
 Second (Red) --> 24
+
 Third (Green) --> 26
+
 Fourth (Red) --> 28
+
 Fifth (Red) --> 30
 
 *NOTE* Ensure there are resistors on each LED or else the entire world will explode. 
