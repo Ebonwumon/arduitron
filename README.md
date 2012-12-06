@@ -30,6 +30,9 @@ Fifth (Red) --> 30
 
 *NOTE* Ensure there are resistors on each LED or else the entire world will explode. 
 
+###Serial###
+The communcations occur on Serial1 so pin 18 on Arduino 1 must link to pin 19 on arduino 2 and vice versa
+
 ##Build Notes##
 Your build target is tron.cpp, with the lcd image libraries. You will need two arduinos to sufficiently run this project; there is no single player mode.
 
